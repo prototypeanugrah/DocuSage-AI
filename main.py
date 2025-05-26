@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import dotenv
 import langchain_core
+import rich
 import yaml  # Add this import after other imports
 from google import genai
 from google.genai import types
@@ -56,7 +57,6 @@ from langchain_ollama.embeddings import OllamaEmbeddings
 # OpenAI imports
 from langchain_openai import OpenAI, OpenAIEmbeddings
 from pydantic import BaseModel
-from rich import print
 
 # Setup logger
 logging.basicConfig(
@@ -258,7 +258,7 @@ class RAGTool:
         """
         all_docs = self._load_and_tag_documents(path)
         split_docs = self._split_documents(all_docs)
-        print(f"Total split documents: {len(split_docs)}")
+        rich.print(f"Total split documents: {len(split_docs)}")
         store_path = os.path.join(
             self.config.persist_directory, metadata or os.path.basename(path)
         )
@@ -347,7 +347,7 @@ class RAGTool:
         answer = self.get_model_response(
             question, qa_chain
         )  # Get the answer from the model
-        print(f"[bold green]Answer:[/bold green] {answer}")
+        rich.print(f"[bold green]Answer:[/bold green] {answer}")
         sources = result.get(
             "source_documents", []
         )  # Get all the sources from the result
@@ -355,7 +355,7 @@ class RAGTool:
             sources
         )  # Get the relevant sources from the model
         for source in relevant_sources:
-            print(f"[bold green]Source:[/bold green] {source}")
+            rich.print(f"[bold green]Source:[/bold green] {source}")
 
         return {"answer": answer, "sources": relevant_sources}
 
