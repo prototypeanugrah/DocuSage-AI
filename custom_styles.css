@@ -1,0 +1,122 @@
+/* Custom Streamlit Styles for Dark and Light Modes */
+
+/* Default: Dark Mode */
+body, .stApp, .block-container {
+    background-color: #18191A !important;
+    color: #fff !important;
+}
+[data-testid="stSidebar"], .stSidebar {
+    background-color: #000 !important;
+    color: #fff !important;
+}
+/* Drag and drop file uploader box */
+[data-testid="stFileUploaderDropzone"] {
+    background-color: #111 !important;
+    color: #fff !important;
+    border: 1.5px dashed #444 !important;
+}
+[data-testid="stFileUploaderDropzone"] * {
+    color: #fff !important;
+}
+/* Top and bottom bars */
+header, .st-emotion-cache-18ni7ap, .st-emotion-cache-1avcm0n, .st-emotion-cache-6qob1r {
+    background: #000 !important;
+}
+/* Chat area and bubbles */
+.stChatMessage {
+    padding: 0.8rem 1.2rem;
+    background: #000 !important;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    color: #fff !important;
+    margin-top: 2.5rem;
+}
+.stChatMessage.is-user {
+    background: #111 !important;
+    color: #fff !important;
+}
+.stChatMessage.is-assistant {
+    background: #18191A !important;
+    color: #fff !important;
+}
+.block-container {
+    padding-top: 2.5rem;
+    padding-bottom: 2rem;
+}
+input, textarea, .stTextInput>div>input, .stTextInput>div>div>input {
+    background-color: #18191A !important;
+    color: #fff !important;
+    border: 1px solid #3A3B3C !important;
+}
+/* Index and Reset Chat button styling in dark mode */
+.stSidebar button, [data-testid="stSidebar"] button, .stButton>button {
+    background-color: #000 !important;
+    color: #fff !important;
+    border: 1px solid #444 !important;
+}
+/* Specifically style the Reset Chat button */
+button:has(span:contains('Reset Chat')) {
+    background-color: #000 !important;
+    color: #fff !important;
+    border: 1px solid #444 !important;
+}
+
+/* Light Mode Styles (optional, if you want to support toggling via a class) */
+body.light-mode, .light-mode .stApp, .light-mode .block-container {
+    background-color: #fff !important;
+    color: #222 !important;
+}
+.light-mode [data-testid="stSidebar"], .light-mode .stSidebar {
+    background-color: #f8f9fa !important;
+    color: #222 !important;
+}
+.light-mode .stChatMessage {
+    padding: 0.8rem 1.2rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    color: #222;
+    margin-top: 2.5rem;
+}
+.light-mode .stChatMessage.is-user {
+    background: #e9ecef;
+    color: #222;
+}
+.light-mode .stChatMessage.is-assistant {
+    background: #f1f3f4;
+    color: #222;
+}
+.light-mode .block-container {
+    padding-top: 2.5rem;
+    padding-bottom: 2rem;
+}
+.light-mode input, .light-mode textarea, .light-mode .stTextInput>div>input, .light-mode .stTextInput>div>div>input {
+    background-color: #fff !important;
+    color: #222 !important;
+    border: 1px solid #ccc !important;
+}
+.light-mode .stSidebar button, .light-mode [data-testid="stSidebar"] button, .light-mode .stButton>button {
+    background-color: #fff !important;
+    color: #222 !important;
+    border: 1px solid #ccc !important;
+}
+
+/* Ensure chat area text is white */
+.stChatMessage, .stChatMessage * {
+    color: #fff !important;
+}
+
+/* Style the bottom chat input bar and its container */
+.st-emotion-cache-13k62yr, /* This is the bottom chat input bar */
+.st-emotion-cache-1wivap2,
+footer, 
+.stFooter,
+.stTextInput, 
+.stTextInput>div>input, 
+.stTextInput>div>div>input, 
+textarea, 
+input[type="text"] {
+    background-color: #000 !important;
+    color: #fff !important;
+    border: 1px solid #444 !important;
+} 

@@ -1,0 +1,14 @@
+chunk_size: 300
+chunk_overlap: 200
+max_tokens: 5000
+temperature: 0.0
+persist_directory: "db"
+model: "gemini"
+max_retries: 3
+openai_embedding_model_name: "text-embedding-3-small"
+ollama_embedding_model_name: "mistral:latest"
+gemini_embedding_model_name: "models/text-embedding-004"
+openai_llm_model_name: "gpt-4o-mini"
+anthropic_llm_model_name: "claude-sonnet-4-20250514"
+ollama_llm_model_name: "gemma3:latest"
+gemini_llm_model_name: "gemini-2.5-flash-preview-05-20"
