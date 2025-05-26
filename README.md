@@ -54,25 +54,6 @@ This project utilizes modern AI techniques such as deep learning and transformer
 
 All configuration is handled via a YAML file (default: `config.yaml`). You can specify a different config file using the `--config` argument.
 
-Example `config.yaml`:
-
-```yaml
-chunk_size: 300
-chunk_overlap: 200
-max_tokens: 5000
-temperature: 0.0
-persist_directory: "db"
-model: "gemini"
-max_retries: 3
-openai_embedding_model_name: "text-embedding-3-small"
-ollama_embedding_model_name: "mistral:latest"
-gemini_embedding_model_name: "models/text-embedding-004"
-openai_llm_model_name: "gpt-4o-mini"
-anthropic_llm_model_name: "claude-sonnet-4-20250514"
-ollama_llm_model_name: "gemma3:latest"
-gemini_llm_model_name: "gemini-2.5-flash-preview-05-20"
-```
-
 **Key options:**
 - `chunk_size`, `chunk_overlap`: Controls document chunking for embedding.
 - `max_tokens`, `temperature`: Model generation parameters.
@@ -87,7 +68,7 @@ gemini_llm_model_name: "gemini-2.5-flash-preview-05-20"
 If a web-based interface is desired (using the Streamlit framework), you can run the app by executing:
 
 ```bash
-streamlit run st_app.py
+streamlit run app.py
 ```
 
 ### Command Line Interface (CLI)
@@ -99,17 +80,24 @@ The main script supports two commands: `index` and `ask`. Both require a config 
 To index a PDF, DOCX, TXT, or a folder of documents:
 
 ```bash
-python main.py --config config.yaml index <path_to_file_or_folder> [--metadata <collection_name>] [--model <model_name>]
+python main.py --config config.yaml index <path_to_file_or_folder> [--metadata <collection_name>]
 ```
 
 - `<path_to_file_or_folder>`: Path to the file or directory you want to index
 - `--metadata <collection_name>`: (Optional) Name for the indexed collection (used as a key for querying)
-- `--model <model_name>`: (Optional) Model to use for embeddings/LLM (`openai`, `gemini`, `claude`, or `ollama`). Overrides the config file for this run.
 
 **Example:**
 
+For a single PDF file
+
 ```bash
-python main.py --config config.yaml index documents/UnderstandingDeepLearning_08_05_23_C.pdf --metadata deep_learning --model gemini
+python main.py --config config.yaml index <file-name.pdf> --metadata deep_learning
+```
+
+For a folder containing multiple documents
+
+```bash
+python main.py --config config.yaml index <dir/> --metadata deep_learning
 ```
 
 #### Asking Questions
