@@ -1,10 +1,10 @@
-# IntelliPDF Agent
+# DocuSageAI Agent
 
 This repository contains a project that leverages modern AI techniques to automate and enhance workflows for processing PDF documents. It is designed to extract insights, summarize content, and assist in various document-driven tasks.
 
-## What is the IntelliPDF Agent?
+## What is the DocuSageAI Agent?
 
-The IntelliPDF Agent is a tool that helps users interact with PDF documents using artificial intelligence. It automates tasks such as extracting text, summarizing content, answering questions, and streamlining document-related workflows. Whether you're dealing with research papers, financial reports, or any other kind of PDF, this tool aims to provide valuable insights quickly.
+The DocuSageAI Agent is a tool that helps users interact with PDF documents using artificial intelligence. It automates tasks such as extracting text, summarizing content, answering questions, and streamlining document-related workflows. Whether you're dealing with research papers, financial reports, or any other kind of PDF, this tool aims to provide valuable insights quickly.
 
 ## Tech Stack & Modern AI Techniques
 
@@ -124,7 +124,7 @@ python main.py --config config.yaml ask deep_learning "What are the main takeawa
 
 ## Applications
 
-The IntelliPDF Agent can be applied in various scenarios including:
+The DocuSageAI Agent can be applied in various scenarios including:
 
 - **Research:** Automatically summarize and extract key insights from academic papers and research documents.
 - **Business:** Analyze financial reports, legal documents, and other business-related PDFs to streamline workflows.
