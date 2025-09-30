@@ -12,8 +12,19 @@ import streamlit as st
 
 import main
 
-config_dict = main.load_config_from_yaml("config.yaml")
-rag_config = main.RAGConfig(**config_dict)
+# Lazily load config and tool only when needed
+_CONFIG_CACHE = None
+_TOOL_CACHE = None
+
+@st.cache_resource(show_spinner=False)
+def get_tool():
+    global _CONFIG_CACHE, _TOOL_CACHE
+    if _TOOL_CACHE is None:
+        if _CONFIG_CACHE is None:
+            _CONFIG_CACHE = main.load_config_from_yaml("config.yaml")
+        rag_config = main.RAGConfig(**_CONFIG_CACHE)
+        _TOOL_CACHE = main.RAGTool(rag_config)
+    return _TOOL_CACHE
 
 # -----------------------------------------------------------------------------
 # Page config & basic style tweaks
@@ -37,9 +48,14 @@ with st.sidebar:
 
 # Inject custom CSS from file
 css_file = "custom_styles.css"
+
+@st.cache_data(show_spinner=False)
+def _load_css(path: str) -> str:
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
 if os.path.exists(css_file):
-    with open(css_file, encoding="utf-8") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    st.markdown(f"<style>{_load_css(css_file)}</style>", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # Helper to extract plain answer (hide metadata)
@@ -79,7 +95,7 @@ def extract_answer(raw_resp: Any) -> str:
 # Initialisation
 # -----------------------------------------------------------------------------
 if "tool" not in st.session_state:
-    st.session_state.tool = main.RAGTool(rag_config)
+    st.session_state.tool = get_tool()
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -150,22 +166,25 @@ if user_prompt:
     if not st.session_state.current_metadata:
         assistant_reply = "Please index a document first! Use the sidebar to upload or select a folder."
     else:
+        assistant_reply = ""
+
+    # Show assistant message (single query already done)
+    sources = []
+    if st.session_state.current_metadata:
         try:
-            assistant_reply = st.session_state.tool.query(
-                st.session_state.current_metadata,
-                user_prompt,
-            )["answer"]  # Get the answer from the result
+            result = st.session_state.tool.query(
+                st.session_state.current_metadata, user_prompt
+            )
+            assistant_reply = result.get("answer", assistant_reply)
+            sources = result.get("sources", [])
         except Exception as e:
             assistant_reply = f"⚠️ An error occurred while querying: `{e}`"
 
-    # Show assistant message
     st.session_state.messages.append(
         {
             "role": "assistant",
             "content": assistant_reply,
-            "sources": st.session_state.tool.query(
-                st.session_state.current_metadata, user_prompt
-            )["sources"],
+            "sources": sources,
         }
     )
     with st.chat_message("assistant"):
