@@ -15,47 +15,21 @@ python main.py ask
     <question>
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
 
-import dotenv
-import langchain_core
-import rich
-import yaml  # Add this import after other imports
-from google import genai
-from google.genai import types
-from langchain.chains import RetrievalQA
+try:
+    import dotenv
+    _LOAD_DOTENV = dotenv.load_dotenv  # type: ignore[attr-defined]
+except Exception:  # pragma: no cover - optional dependency
+    def _LOAD_DOTENV() -> None:  # fallback no-op
+        return None
 
-# Anthropic imports
-from langchain_anthropic import ChatAnthropic
-from langchain_chroma import Chroma
-
-# import typer  # Removed Typer
-from langchain_community.document_loaders import (
-    PyPDFLoader,
-    TextLoader,
-    UnstructuredPowerPointLoader,
-    UnstructuredWordDocumentLoader,
-)
-from langchain_core.document_loaders.base import BaseLoader
-from langchain_core.documents import Document
-
-# Text splitters imports
-from langchain_experimental.text_splitter import SemanticChunker
-
-# Gemini imports
-from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
-from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
-
-# Ollama imports
-from langchain_ollama.chat_models import ChatOllama
-from langchain_ollama.embeddings import OllamaEmbeddings
-
-# OpenAI imports
-from langchain_openai import OpenAI, OpenAIEmbeddings
 from pydantic import BaseModel
 
 # Setup logger
@@ -64,7 +38,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-dotenv.load_dotenv()
+_LOAD_DOTENV()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -114,6 +88,11 @@ def model_factory(
         tuple: A tuple containing the embeddings, llm, and client.
     """
     if model_name == "gemini":
+        # Lazy imports for Gemini
+        from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
+        from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
+        from google import genai
+
         embeddings = GoogleGenerativeAIEmbeddings(
             model=config.gemini_embedding_model_name
         )
@@ -125,6 +104,9 @@ def model_factory(
         )
         client = genai.Client()
     elif model_name == "openai":
+        # Lazy imports for OpenAI
+        from langchain_openai import OpenAI, OpenAIEmbeddings
+
         embeddings = OpenAIEmbeddings(model=config.openai_embedding_model_name)
         llm = OpenAI(
             api_key=OPENAI_API_KEY,
@@ -135,6 +117,10 @@ def model_factory(
         )
         client = None
     elif model_name == "ollama":
+        # Lazy imports for Ollama
+        from langchain_ollama.chat_models import ChatOllama
+        from langchain_ollama.embeddings import OllamaEmbeddings
+
         embeddings = OllamaEmbeddings(model=config.ollama_embedding_model_name)
         llm = ChatOllama(
             model=config.ollama_llm_model_name,
@@ -143,6 +129,10 @@ def model_factory(
         )
         client = None
     elif model_name == "claude":
+        # Lazy imports for Anthropic (Claude)
+        from langchain_ollama.embeddings import OllamaEmbeddings
+        from langchain_anthropic import ChatAnthropic
+
         embeddings = OllamaEmbeddings(model=config.ollama_embedding_model_name)
         llm = ChatAnthropic(
             api_key=ANTHROPIC_API_KEY,
@@ -195,12 +185,37 @@ class RAGTool:
                     ext = os.path.splitext(full_path)[1].lower()
                     try:
                         if ext == ".pdf":
+                            from langchain_community.document_loaders import PyPDFLoader
                             loaders.append(PyPDFLoader(full_path))
                         elif ext in [".docx", ".doc"]:
-                            loaders.append(UnstructuredWordDocumentLoader(full_path))
+                            try:
+                                from langchain_community.document_loaders import (
+                                    UnstructuredWordDocumentLoader,
+                                )
+
+                                loaders.append(UnstructuredWordDocumentLoader(full_path))
+                            except Exception as e:
+                                logger.warning(
+                                    "Unstructured loaders unavailable, skipping %s: %s",
+                                    file,
+                                    e,
+                                )
                         elif ext in [".pptx", ".ppt"]:
-                            loaders.append(UnstructuredPowerPointLoader(full_path))
+                            try:
+                                from langchain_community.document_loaders import (
+                                    UnstructuredPowerPointLoader,
+                                )
+
+                                loaders.append(UnstructuredPowerPointLoader(full_path))
+                            except Exception as e:
+                                logger.warning(
+                                    "Unstructured loaders unavailable, skipping %s: %s",
+                                    file,
+                                    e,
+                                )
                         elif ext == ".txt":
+                            from langchain_community.document_loaders import TextLoader
+
                             loaders.append(TextLoader(full_path, encoding="utf8"))
                     except ValueError as e:
                         logger.error("Skipping file %s: %s", file, e)
@@ -208,12 +223,38 @@ class RAGTool:
             ext = os.path.splitext(path)[1].lower()
             try:
                 if ext == ".pdf":
+                    from langchain_community.document_loaders import PyPDFLoader
+
                     loaders.append(PyPDFLoader(path))
                 elif ext in [".docx", ".doc"]:
-                    loaders.append(UnstructuredWordDocumentLoader(path))
+                    try:
+                        from langchain_community.document_loaders import (
+                            UnstructuredWordDocumentLoader,
+                        )
+
+                        loaders.append(UnstructuredWordDocumentLoader(path))
+                    except Exception as e:
+                        logger.warning(
+                            "Unstructured loaders unavailable, skipping %s: %s",
+                            os.path.basename(path),
+                            e,
+                        )
                 elif ext in [".pptx", ".ppt"]:
-                    loaders.append(UnstructuredPowerPointLoader(path))
+                    try:
+                        from langchain_community.document_loaders import (
+                            UnstructuredPowerPointLoader,
+                        )
+
+                        loaders.append(UnstructuredPowerPointLoader(path))
+                    except Exception as e:
+                        logger.warning(
+                            "Unstructured loaders unavailable, skipping %s: %s",
+                            os.path.basename(path),
+                            e,
+                        )
                 elif ext == ".txt":
+                    from langchain_community.document_loaders import TextLoader
+
                     loaders.append(TextLoader(path, encoding="utf8"))
                 else:
                     raise ValueError(f"Unsupported file type: {ext}")
@@ -245,6 +286,9 @@ class RAGTool:
         """
         Split documents into chunks using a semantic chunker.
         """
+        # Lazy import for text splitter
+        from langchain_experimental.text_splitter import SemanticChunker
+
         splitter = SemanticChunker(
             self.embeddings,
             breakpoint_threshold_type="standard_deviation",
@@ -256,14 +300,18 @@ class RAGTool:
         """
         Index the documents at the given path, optionally using a metadata key.
         """
+        # Lazy import for optional logging and vector store
+        import rich
+        from langchain_chroma import Chroma
+
         all_docs = self._load_and_tag_documents(path)
         split_docs = self._split_documents(all_docs)
         rich.print(f"Total split documents: {len(split_docs)}")
         store_path = os.path.join(
             self.config.persist_directory, metadata or os.path.basename(path)
         )
-        # Uncomment to persist to Chroma vector DB:
-        vectordb = Chroma.from_documents(
+        # Persist to Chroma vector DB
+        Chroma.from_documents(
             split_docs,
             self.embeddings,
             persist_directory=store_path,
@@ -281,6 +329,9 @@ class RAGTool:
         Returns:
             str: The name of the cached content.
         """
+        # Lazy import for Google types
+        from google.genai import types
+
         # Upload file
         file = self.client.files.upload(file=file_path)
         while file.state.name == "PROCESSING":
@@ -311,9 +362,12 @@ class RAGTool:
         Returns:
             str: The answer to the question.
         """
+        # Lazy import for message types
+        from langchain_core.messages import HumanMessage
+
         llm = self.llm
         llm.cached_content = cache_name  # type: ignore[attr-defined]
-        message = langchain_core.messages.HumanMessage(content=question)
+        message = HumanMessage(content=question)
         response = llm.invoke([message])
         return response
 
@@ -328,6 +382,11 @@ class RAGTool:
         Returns:
             dict: The result containing the answer and source documents.
         """
+        # Lazy imports for vector store, chain, and logging
+        from langchain_chroma import Chroma
+        from langchain.chains import RetrievalQA
+        import rich
+
         store_path = os.path.join(self.config.persist_directory, metadata)
         vectordb = Chroma(
             persist_directory=store_path,
@@ -344,16 +403,12 @@ class RAGTool:
         )
         result = qa_chain.invoke({"query": question})
 
-        answer = self.get_model_response(
-            question, qa_chain
-        )  # Get the answer from the model
+        # Use the already computed result to avoid double invocation
+        answer = result.get("result", "")
         rich.print(f"[bold green]Answer:[/bold green] {answer}")
-        sources = result.get(
-            "source_documents", []
-        )  # Get all the sources from the result
-        relevant_sources = self.get_model_sources(
-            sources
-        )  # Get the relevant sources from the model
+
+        source_docs = result.get("source_documents", [])
+        relevant_sources = self.get_model_sources(source_docs)
         for source in relevant_sources:
             rich.print(f"[bold green]Source:[/bold green] {source}")
 
@@ -382,15 +437,21 @@ class RAGTool:
         Returns:
             List[str]: The sources from the model.
         """
-        return set(
-            doc.metadata.get("source") for doc in sources if doc.metadata.get("source")
-        )
+        unique_sources = {
+            doc.metadata.get("source")
+            for doc in sources
+            if doc.metadata.get("source")
+        }
+        return sorted(unique_sources)
 
 
 def load_config_from_yaml(yaml_path: str) -> Dict[str, Any]:
     """
     Load configuration from a YAML file.
     """
+    # Lazy import to avoid loading YAML parser on cold import
+    import yaml
+
     with open(yaml_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
