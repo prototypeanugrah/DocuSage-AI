@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+.DS_Store
+
+# Environments
+.venv/
+.env
+uv.lock
+
+# Artifacts
+artifacts/
+backend/artifacts/
+*.pdf
+
+# Database
+db/
+

@@ -1,514 +1,103 @@
 """
-This is a RAGTool for indexing and querying documents.
-It uses the Google Generative AI API to index and query documents.
-It uses the Chroma vector database to store and query documents.
-It uses the Langchain framework to build the RAG pipeline.
+Smart PDF RAG with automatic image detection and routing.
+
+This solution:
+1. Checks each PDF page for images
+2. Routes pages WITH images → multimodal embedding (text + image)
+3. Routes pages WITHOUT images → text-only embedding
+4. Uses the same NVIDIA model for both paths
 
 Usage:
-python main.py index
-    --config config.yaml
-    <path to file or directory to index>
-    --metadata <name of the collection>
-python main.py ask
-    --config config.yaml
-    <name of the collection>
-    <question>
+    # Index a PDF (automatically detects and routes pages)
+    python smart_pdf_rag.py index --pdf document.pdf --collection my_docs
+
+    # Query the indexed content
+    python smart_pdf_rag.py query --collection my_docs --question "Your question here"
 """
 
-from __future__ import annotations
-
 import argparse
-import logging
-import os
-import time
-from typing import Any, Dict, List, Optional
 
-try:
-    import dotenv
-    _LOAD_DOTENV = dotenv.load_dotenv  # type: ignore[attr-defined]
-except Exception:  # pragma: no cover - optional dependency
-    def _LOAD_DOTENV() -> None:  # fallback no-op
-        return None
+from dotenv import load_dotenv
+from rich.console import Console
 
-from pydantic import BaseModel
+from backend.config import Config, DataIngestionConfig, LLMConfig
+from backend.services.data_ingestion import data_ingestion
+from backend.services.rag_service import RAGService
+from backend.utils import load_config
 
-# Setup logger
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+load_dotenv()
 
-_LOAD_DOTENV()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-
-class RAGConfig(BaseModel):
-    """
-    RAGConfig is a configuration for the RAGTool.
-    It contains the configuration keys and their datatypes and default values.
-
-    Args:
-        BaseModel: The base model for the RAGConfig.
-    """
-
-    chunk_size: int
-    chunk_overlap: int
-    max_tokens: int
-    temperature: float
-    persist_directory: str
-    model: str
-    max_retries: int
-    openai_embedding_model_name: str
-    ollama_embedding_model_name: str
-    gemini_embedding_model_name: str
-    openai_llm_model_name: str
-    anthropic_llm_model_name: str
-    ollama_llm_model_name: str
-    gemini_llm_model_name: str
-
-
-def model_factory(
-    model_name: str,
-    config: RAGConfig,
-) -> tuple[Any, Any, Any]:
-    """
-    This function is used to create the embeddings and llm models depending
-    on the model_name.
-
-    Args:
-        model_name (str): The name of the model to use.
-        config (RAGConfig): The configuration for the RAGTool.
-
-    Raises:
-        ValueError: If the model_name is not valid.
-
-    Returns:
-        tuple: A tuple containing the embeddings, llm, and client.
-    """
-    if model_name == "gemini":
-        # Lazy imports for Gemini
-        from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
-        from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
-        from google import genai
-
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model=config.gemini_embedding_model_name
-        )
-        llm = ChatGoogleGenerativeAI(
-            api_key=GOOGLE_API_KEY,
-            model=config.gemini_llm_model_name,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-        )
-        client = genai.Client()
-    elif model_name == "openai":
-        # Lazy imports for OpenAI
-        from langchain_openai import OpenAI, OpenAIEmbeddings
-
-        embeddings = OpenAIEmbeddings(model=config.openai_embedding_model_name)
-        llm = OpenAI(
-            api_key=OPENAI_API_KEY,
-            model=config.openai_llm_model_name,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-            max_retries=config.max_retries,
-        )
-        client = None
-    elif model_name == "ollama":
-        # Lazy imports for Ollama
-        from langchain_ollama.chat_models import ChatOllama
-        from langchain_ollama.embeddings import OllamaEmbeddings
-
-        embeddings = OllamaEmbeddings(model=config.ollama_embedding_model_name)
-        llm = ChatOllama(
-            model=config.ollama_llm_model_name,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-        )
-        client = None
-    elif model_name == "claude":
-        # Lazy imports for Anthropic (Claude)
-        from langchain_ollama.embeddings import OllamaEmbeddings
-        from langchain_anthropic import ChatAnthropic
-
-        embeddings = OllamaEmbeddings(model=config.ollama_embedding_model_name)
-        llm = ChatAnthropic(
-            api_key=ANTHROPIC_API_KEY,
-            model=config.anthropic_llm_model_name,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-            max_retries=config.max_retries,
-        )
-        client = None
-    else:
-        raise ValueError(f"Unknown model: {model_name}")
-    return embeddings, llm, client
-
-
-class RAGTool:
-    """
-    Tool for indexing and querying documents using a RAG pipeline.
-    """
-
-    def __init__(self, config: RAGConfig) -> None:
-        """
-        Initialize the RAGTool.
-
-        Args:
-            config (RAGConfig): The configuration for the RAGTool.
-        """
-        self.config = config
-        self.embeddings, self.llm, self.client = model_factory(
-            config.model.lower(), config
-        )
-
-    def get_loaders(self, path: str) -> List[BaseLoader]:
-        """
-        Get the loaders for the RAGTool.
-
-        Args:
-            path (str): The path to the documents to load.
-
-        Returns:
-            list[langchain_core.document_loaders.base.BaseLoader]: The loaders
-            for the RAGTool.
-        """
-        loaders: List[BaseLoader] = []
-        if os.path.isdir(path):
-            for root, _, files in os.walk(path):
-                for file in files:
-                    if file.startswith("~$"):
-                        continue  # Skip temp/lock files
-                    full_path = os.path.join(root, file)
-                    ext = os.path.splitext(full_path)[1].lower()
-                    try:
-                        if ext == ".pdf":
-                            from langchain_community.document_loaders import PyPDFLoader
-                            loaders.append(PyPDFLoader(full_path))
-                        elif ext in [".docx", ".doc"]:
-                            try:
-                                from langchain_community.document_loaders import (
-                                    UnstructuredWordDocumentLoader,
-                                )
-
-                                loaders.append(UnstructuredWordDocumentLoader(full_path))
-                            except Exception as e:
-                                logger.warning(
-                                    "Unstructured loaders unavailable, skipping %s: %s",
-                                    file,
-                                    e,
-                                )
-                        elif ext in [".pptx", ".ppt"]:
-                            try:
-                                from langchain_community.document_loaders import (
-                                    UnstructuredPowerPointLoader,
-                                )
-
-                                loaders.append(UnstructuredPowerPointLoader(full_path))
-                            except Exception as e:
-                                logger.warning(
-                                    "Unstructured loaders unavailable, skipping %s: %s",
-                                    file,
-                                    e,
-                                )
-                        elif ext == ".txt":
-                            from langchain_community.document_loaders import TextLoader
-
-                            loaders.append(TextLoader(full_path, encoding="utf8"))
-                    except ValueError as e:
-                        logger.error("Skipping file %s: %s", file, e)
-        else:
-            ext = os.path.splitext(path)[1].lower()
-            try:
-                if ext == ".pdf":
-                    from langchain_community.document_loaders import PyPDFLoader
-
-                    loaders.append(PyPDFLoader(path))
-                elif ext in [".docx", ".doc"]:
-                    try:
-                        from langchain_community.document_loaders import (
-                            UnstructuredWordDocumentLoader,
-                        )
-
-                        loaders.append(UnstructuredWordDocumentLoader(path))
-                    except Exception as e:
-                        logger.warning(
-                            "Unstructured loaders unavailable, skipping %s: %s",
-                            os.path.basename(path),
-                            e,
-                        )
-                elif ext in [".pptx", ".ppt"]:
-                    try:
-                        from langchain_community.document_loaders import (
-                            UnstructuredPowerPointLoader,
-                        )
-
-                        loaders.append(UnstructuredPowerPointLoader(path))
-                    except Exception as e:
-                        logger.warning(
-                            "Unstructured loaders unavailable, skipping %s: %s",
-                            os.path.basename(path),
-                            e,
-                        )
-                elif ext == ".txt":
-                    from langchain_community.document_loaders import TextLoader
-
-                    loaders.append(TextLoader(path, encoding="utf8"))
-                else:
-                    raise ValueError(f"Unsupported file type: {ext}")
-            except ValueError as e:
-                logger.error("Skipping file %s: %s", os.path.basename(path), e)
-        return loaders
-
-    def _load_and_tag_documents(self, path: str) -> List[Document]:
-        """
-        Index the documents in the RAGTool.
-
-        Args:
-            path (str): The path to the documents to index.
-            metadata (Optional[str]): The metadata for the documents.
-
-        Returns:
-            None
-        """
-        all_docs: List[Document] = []
-        for loader in self.get_loaders(path):
-            docs = loader.load()
-            src_path = getattr(loader, "file_path", path)
-            for doc in docs:
-                doc.metadata["source"] = os.path.basename(src_path)
-            all_docs.extend(docs)
-        return all_docs
-
-    def _split_documents(self, docs: List[Document]) -> List[Document]:
-        """
-        Split documents into chunks using a semantic chunker.
-        """
-        # Lazy import for text splitter
-        from langchain_experimental.text_splitter import SemanticChunker
-
-        splitter = SemanticChunker(
-            self.embeddings,
-            breakpoint_threshold_type="standard_deviation",
-            buffer_size=3,
-        )
-        return splitter.split_documents(docs)
-
-    def index(self, path: str, metadata: Optional[str] = None) -> None:
-        """
-        Index the documents at the given path, optionally using a metadata key.
-        """
-        # Lazy import for optional logging and vector store
-        import rich
-        from langchain_chroma import Chroma
-
-        all_docs = self._load_and_tag_documents(path)
-        split_docs = self._split_documents(all_docs)
-        rich.print(f"Total split documents: {len(split_docs)}")
-        store_path = os.path.join(
-            self.config.persist_directory, metadata or os.path.basename(path)
-        )
-        # Persist to Chroma vector DB
-        Chroma.from_documents(
-            split_docs,
-            self.embeddings,
-            persist_directory=store_path,
-            collection_name=metadata or os.path.basename(path),
-        )
-        logger.info("Indexed %s documents to %s", len(split_docs), store_path)
-
-    def upload_and_cache_file(self, file_path: str) -> str:
-        """
-        Upload and cache a file in the RAGTool.
-
-        Args:
-            file_path (str): The path to the file to upload and cache.
-
-        Returns:
-            str: The name of the cached content.
-        """
-        # Lazy import for Google types
-        from google.genai import types
-
-        # Upload file
-        file = self.client.files.upload(file=file_path)
-        while file.state.name == "PROCESSING":
-            time.sleep(2)
-            file = self.client.files.get(name=file.name)
-        cache = self.client.caches.create(
-            model=self.config.gemini_llm_model_name,
-            config=types.CreateCachedContentConfig(
-                display_name="Cached Content",
-                system_instruction=(
-                    "You are an expert content analyzer, and your job is to answer "
-                    "the user's query based on the files you have access to."
-                ),
-                contents=[file],
-                ttl="300s",
-            ),
-        )
-        return cache.name
-
-    def query_cached_content(self, cache_name: str, question: str) -> str:
-        """
-        Query the cached content in the RAGTool.
-
-        Args:
-            cache_name (str): The name of the cached content.
-            question (str): The question to ask the cached content.
-
-        Returns:
-            str: The answer to the question.
-        """
-        # Lazy import for message types
-        from langchain_core.messages import HumanMessage
-
-        llm = self.llm
-        llm.cached_content = cache_name  # type: ignore[attr-defined]
-        message = HumanMessage(content=question)
-        response = llm.invoke([message])
-        return response
-
-    def query(self, metadata: str, question: str) -> Dict[str, Any]:
-        """
-        Query the RAGTool.
-
-        Args:
-            metadata (str): The metadata for the documents.
-            question (str): The question to ask the RAGTool.
-
-        Returns:
-            dict: The result containing the answer and source documents.
-        """
-        # Lazy imports for vector store, chain, and logging
-        from langchain_chroma import Chroma
-        from langchain.chains import RetrievalQA
-        import rich
-
-        store_path = os.path.join(self.config.persist_directory, metadata)
-        vectordb = Chroma(
-            persist_directory=store_path,
-            embedding_function=self.embeddings,
-            collection_name=metadata,
-        )
-        retriever = vectordb.as_retriever(search_type="mmr", search_kwargs={"k": 8})
-
-        qa_chain = RetrievalQA.from_chain_type(
-            self.llm,
-            retriever=retriever,
-            return_source_documents=True,
-            verbose=True,
-        )
-        result = qa_chain.invoke({"query": question})
-
-        # Use the already computed result to avoid double invocation
-        answer = result.get("result", "")
-        rich.print(f"[bold green]Answer:[/bold green] {answer}")
-
-        source_docs = result.get("source_documents", [])
-        relevant_sources = self.get_model_sources(source_docs)
-        for source in relevant_sources:
-            rich.print(f"[bold green]Source:[/bold green] {source}")
-
-        return {"answer": answer, "sources": relevant_sources}
-
-    def get_model_response(self, question: str, rqa: RetrievalQA) -> str:
-        """
-        Get the response from the model.
-
-        Args:
-            question (str): The question to ask the model.
-            rqa (RetrievalQA): The retrieval QA chain.
-
-        Returns:
-            str: The response from the model.
-        """
-        return rqa.invoke({"query": question}).get("result", "")
-
-    def get_model_sources(self, sources: List[Document]) -> List[str]:
-        """
-        Get the sources from the model.
-
-        Args:
-            sources (List[Document]): The sources to get.
-
-        Returns:
-            List[str]: The sources from the model.
-        """
-        unique_sources = {
-            doc.metadata.get("source")
-            for doc in sources
-            if doc.metadata.get("source")
-        }
-        return sorted(unique_sources)
-
-
-def load_config_from_yaml(yaml_path: str) -> Dict[str, Any]:
-    """
-    Load configuration from a YAML file.
-    """
-    # Lazy import to avoid loading YAML parser on cold import
-    import yaml
-
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+console = Console()
 
 
 def main():
+    """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="RAG Tool to index and query documents"
+        description="Smart PDF RAG with automatic image detection and routing"
     )
+
     parser.add_argument(
         "--config",
-        type=str,
-        default="config.yaml",
-        help="Path to the config file",
+        required=False,
+        default="backend/config/config.yaml",
+        help="Path to config file",
     )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Index command
     index_parser = subparsers.add_parser(
-        "index", help="Index a PDF, doc, or folder for RAG."
+        "index",
+        help="Index a PDF or directory of PDFs (automatically routes pages based on image presence)",
     )
     index_parser.add_argument(
-        "path", type=str, help="Path to file or directory to index"
+        "--data", required=True, help="Path to PDF file or directory containing PDFs"
     )
-    index_parser.add_argument(
-        "--metadata",
-        type=str,
-        default=None,
-        help="Metadata name for the collection",
-    )
-    index_parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        choices=["openai", "gemini", "claude", "ollama"],
-        help="Model to use: openai, gemini, claude, ollama",
-    )
+    index_parser.add_argument("--collection", required=True, help="Collection name")
 
-    # Ask command
-    ask_parser = subparsers.add_parser(
-        "ask", help="Ask a question against an indexed RAG collection."
+    # Query command
+    query_parser = subparsers.add_parser("query", help="Query indexed content")
+    query_parser.add_argument("--collection", required=True, help="Collection name")
+    query_parser.add_argument("--question", required=True, help="Question to ask")
+    query_parser.add_argument(
+        "--k",
+        type=int,
+        default=6,
+        help="Number of results to retrieve (default: 6)",
     )
-    ask_parser.add_argument(
-        "metadata", type=str, help="Metadata name for the collection"
-    )
-    ask_parser.add_argument("question", type=str, help="Question to ask")
 
     args = parser.parse_args()
 
-    config_dict = load_config_from_yaml(args.config)
+    # Load configuration
+    config: Config = load_config(args.config)
+    data_ingestion_config: DataIngestionConfig = config.data_ingestion
+    llm_config: LLMConfig = config.llm_config
 
-    config = RAGConfig(**config_dict)
-    tool = RAGTool(config)
+    # Initialize smart RAG system
+    rag = RAGService(llm_config)
 
-    if args.command == "index":
-        tool.index(args.path, args.metadata)
-    elif args.command == "ask":
-        tool.query(args.metadata, args.question)
+    # # Execute command
+    if args.command == "ingestion":
+        console.print(
+            f"{'=' * 20} Starting data ingestion... {'=' * 20}", style="green"
+        )
+        data_ingestion(data_ingestion_config)
+        console.print(
+            f"{'=' * 20} Data ingestion completed successfully. {'=' * 20}",
+            style="green",
+        )
+    elif args.command == "index":
+        console.print(f"{'=' * 20} Starting indexing... {'=' * 20}", style="green")
+        rag.index(args.data, args.collection)
+        console.print(
+            f"{'=' * 20} Indexing completed successfully. {'=' * 20}", style="green"
+        )
+    elif args.command == "query":
+        console.print(f"{'=' * 20} Starting querying... {'=' * 20}", style="green")
+        rag.query(args.collection, args.question, args.k)
+        console.print(
+            f"{'=' * 20} Querying completed successfully. {'=' * 20}", style="green"
+        )
 
 
 if __name__ == "__main__":

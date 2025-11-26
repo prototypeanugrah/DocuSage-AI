@@ -1,0 +1,16 @@
+data_ingestion:
+  query: "cs.CV"
+  max_results: 10
+  discovered_papers_save_dir: "backend/artifacts/papers"
+
+llm_config:
+  chunk_size: 500
+  chunk_overlap: 200
+  max_tokens: 100
+  temperature: 0.0
+  persist_directory: "db"
+  model: "gemini"
+  max_retries: 3
+  llm_model_name: "gpt-4o-mini"
+  multimodal_embedding_model_name: "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1"
+  verbose: true

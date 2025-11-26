@@ -1,191 +1,143 @@
-"""
-This is a Streamlit app that allows you to index and query documents using the RAGTool.
-
-Usage:
-streamlit run app.py
-"""
-
 import os
-from typing import Any, Dict
+import tempfile
 
 import streamlit as st
 
-import main
+from backend.config import LLMConfig
+from backend.services.rag_service import RAGService
 
-# Lazily load config and tool only when needed
-_CONFIG_CACHE = None
-_TOOL_CACHE = None
-
-@st.cache_resource(show_spinner=False)
-def get_tool():
-    global _CONFIG_CACHE, _TOOL_CACHE
-    if _TOOL_CACHE is None:
-        if _CONFIG_CACHE is None:
-            _CONFIG_CACHE = main.load_config_from_yaml("config.yaml")
-        rag_config = main.RAGConfig(**_CONFIG_CACHE)
-        _TOOL_CACHE = main.RAGTool(rag_config)
-    return _TOOL_CACHE
-
-# -----------------------------------------------------------------------------
-# Page config & basic style tweaks
-# -----------------------------------------------------------------------------
+# Page config
 st.set_page_config(
-    page_title="RAG Chat • Ask your PDFs",
-    page_icon="📝",
+    page_title="DocuSage AI",
+    page_icon="🤖",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# -----------------------------------------------------------------------------
-# Dark/Light mode toggle and dynamic CSS
-# -----------------------------------------------------------------------------
-if "dark_mode" not in st.session_state:
-    st.session_state["dark_mode"] = True  # Default to dark mode
 
-with st.sidebar:
-    st.session_state["dark_mode"] = st.toggle(
-        "🌙 Dark mode", value=st.session_state["dark_mode"]
-    )
-
-# Inject custom CSS from file
-css_file = "custom_styles.css"
-
-@st.cache_data(show_spinner=False)
-def _load_css(path: str) -> str:
-    with open(path, encoding="utf-8") as f:
-        return f.read()
-
-if os.path.exists(css_file):
-    st.markdown(f"<style>{_load_css(css_file)}</style>", unsafe_allow_html=True)
-
-# -----------------------------------------------------------------------------
-# Helper to extract plain answer (hide metadata)
-# -----------------------------------------------------------------------------
+# Load custom CSS
+def load_css():
+    with open("assets/custom_styles.css", "r") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
-def extract_answer(raw_resp: Any) -> str:
-    """Return the plain answer string from whatever the RAGTool gives back.
+load_css()
 
-    *   If it is already a string, pass through.
-    *   If it is a dict (e.g. {'result': ..., 'source_documents': ...}) take the
-        'result' field and optionally append nicely-formatted citations.
-    *   Else fallback to str(raw_resp).
-    """
-    if isinstance(raw_resp, str):
-        return raw_resp
-
-    if isinstance(raw_resp, Dict):
-        answer = raw_resp.get("answer", "")
-        srcs = raw_resp.get("sources", [])
-        if srcs:
-            answer += "\n\n**Sources:**\n"
-            for i, doc in enumerate(srcs, 1):
-                try:
-                    page = doc.metadata.get("page", "?")
-                    src = doc.metadata.get("source", "document")
-                    answer += f"- ({i}) *{src}*, page {page}\n"
-                except Exception:
-                    answer += f"- ({i}) reference\n"
-        return answer
-
-    # Fallback – just string-ify
-    return str(raw_resp)
-
-
-# -----------------------------------------------------------------------------
-# Initialisation
-# -----------------------------------------------------------------------------
-if "tool" not in st.session_state:
-    st.session_state.tool = get_tool()
-
+# Initialize Session State
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "Hi! 👋 Upload a document in the sidebar, click *Index*, and then ask me anything about it.",
-        }
-    ]
+    st.session_state.messages = []
 
-if "current_metadata" not in st.session_state:
-    st.session_state.current_metadata = ""
+if "rag_service" not in st.session_state:
+    config = LLMConfig()
+    st.session_state.rag_service = RAGService(config)
 
-# -----------------------------------------------------------------------------
-# Sidebar – Document indexing controls
-# -----------------------------------------------------------------------------
+if "current_collection" not in st.session_state:
+    st.session_state.current_collection = "default_collection"
+
+# Sidebar
 with st.sidebar:
-    st.header("📂 Document Indexing")
+    st.title("📚 DocuSage AI")
+    st.markdown("---")
 
-    uploaded_file = st.file_uploader(
-        "Upload a document",
-        type=[
-            "pdf",
-            "docx",
-            "txt",
-        ],
+    st.subheader("📁 Document Management")
+
+    # Collection Name Input
+    collection_name = st.text_input(
+        "Collection Name",
+        value=st.session_state.current_collection,
+        help="Enter a unique name for your document collection",
     )
-    dir_path = st.text_input("…or enter a folder path")
-    meta_name = st.text_input("Metadata name", value="default")
 
-    if st.button("Index"):
-        if uploaded_file is not None:
-            tmp_path = os.path.join("/tmp", uploaded_file.name)
-            with open(tmp_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.session_state.tool.index(tmp_path, meta_name)
-            st.success(
-                f"Indexed **{uploaded_file.name}** ➜ metadata key **{meta_name}**"
-            )
-            st.session_state.current_metadata = meta_name
-        elif dir_path:
-            st.session_state.tool.index(dir_path, meta_name)
-            st.success(f"Indexed folder **{dir_path}** ➜ metadata key **{meta_name}**")
-            st.session_state.current_metadata = meta_name
+    if collection_name:
+        st.session_state.current_collection = collection_name
+
+    # File Uploader
+    uploaded_files = st.file_uploader(
+        "Upload PDF Documents", type=["pdf"], accept_multiple_files=True
+    )
+
+    if st.button("Process Documents", type="primary"):
+        if uploaded_files:
+            with st.spinner("Processing documents... This may take a while."):
+                # Create a temporary directory to save uploaded files
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    for uploaded_file in uploaded_files:
+                        file_path = os.path.join(temp_dir, uploaded_file.name)
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+
+                    # Index the documents
+                    try:
+                        st.session_state.rag_service.index(
+                            data_path=temp_dir,
+                            collection_name=st.session_state.current_collection,
+                        )
+                        st.success(
+                            f"Successfully processed {len(uploaded_files)} files!"
+                        )
+                    except Exception as e:
+                        st.error(f"Error processing documents: {str(e)}")
         else:
-            st.error("Please upload a document or specify a directory path.")
+            st.warning("Please upload at least one PDF file.")
 
     st.markdown("---")
-    if st.button("🗑️  Reset Chat"):
-        st.session_state.messages = st.session_state.messages[:1]  # keep greeting
-        st.experimental_rerun()
+    st.markdown("### 🛠️ Settings")
+    st.info(f"Current Collection: **{st.session_state.current_collection}**")
 
-# -----------------------------------------------------------------------------
-# Main area – Chat interface
-# -----------------------------------------------------------------------------
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"], unsafe_allow_html=True)
+# Main Chat Interface
+st.header("💬 Chat with your Documents")
 
-user_prompt = st.chat_input("Ask a question about your documents…")
+# Display chat messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if "sources" in message:
+            with st.expander("📚 View Sources"):
+                for i, doc in enumerate(message["sources"], 1):
+                    source = doc.metadata.get("source", "Unknown")
+                    page = doc.metadata.get("page", "?")
+                    st.markdown(
+                        f"**Source {i}:** {os.path.basename(source)} (Page {page})"
+                    )
+                    st.markdown(f"> {doc.page_content[:300]}...")
+                    st.markdown("---")
 
-if user_prompt:
-    # Show user message immediately
-    st.session_state.messages.append({"role": "user", "content": user_prompt})
+# Chat Input
+if prompt := st.chat_input("Ask a question about your documents..."):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(user_prompt)
+        st.markdown(prompt)
 
-    # Guard: ensure we have indexed docs
-    if not st.session_state.current_metadata:
-        assistant_reply = "Please index a document first! Use the sidebar to upload or select a folder."
-    else:
-        assistant_reply = ""
-
-    # Show assistant message (single query already done)
-    sources = []
-    if st.session_state.current_metadata:
-        try:
-            result = st.session_state.tool.query(
-                st.session_state.current_metadata, user_prompt
-            )
-            assistant_reply = result.get("answer", assistant_reply)
-            sources = result.get("sources", [])
-        except Exception as e:
-            assistant_reply = f"⚠️ An error occurred while querying: `{e}`"
-
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": assistant_reply,
-            "sources": sources,
-        }
-    )
+    # Generate response
     with st.chat_message("assistant"):
-        st.markdown(assistant_reply, unsafe_allow_html=True)
+        with st.spinner("Thinking..."):
+            try:
+                response = st.session_state.rag_service.query(
+                    collection_name=st.session_state.current_collection, question=prompt
+                )
+
+                answer = response["answer"]
+                sources = response["sources"]
+
+                st.markdown(answer)
+
+                # Display sources in an expander
+                if sources:
+                    with st.expander("📚 View Sources"):
+                        for i, doc in enumerate(sources, 1):
+                            source = doc.metadata.get("source", "Unknown")
+                            page = doc.metadata.get("page", "?")
+                            st.markdown(
+                                f"**Source {i}:** {os.path.basename(source)} (Page {page})"
+                            )
+                            st.markdown(f"> {doc.page_content[:300]}...")
+                            st.markdown("---")
+
+                # Add assistant message to chat history
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": answer, "sources": sources}
+                )
+
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
